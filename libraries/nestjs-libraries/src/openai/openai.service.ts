@@ -4,8 +4,10 @@ import { shuffle } from 'lodash';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
 
+const isGoogle = !!process.env.GOOGLE_AI_STUDIO_API_KEY;
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
+  apiKey: process.env.GOOGLE_AI_STUDIO_API_KEY || process.env.OPENAI_API_KEY || 'sk-proj-',
+  baseURL: isGoogle ? (process.env.OPENAI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/') : process.env.OPENAI_BASE_URL,
 });
 
 const PicturePrompt = z.object({
@@ -19,11 +21,25 @@ const VoicePrompt = z.object({
 @Injectable()
 export class OpenaiService {
   async generateImage(prompt: string, isUrl: boolean, isVertical = false) {
+    const model = process.env.OPENAI_IMAGE_MODEL_NAME || 'dall-e-3';
+    if (process.env.GOOGLE_AI_STUDIO_API_KEY && model.includes('imagen')) {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${process.env.GOOGLE_AI_STUDIO_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1 } })
+      });
+      const data: any = await res.json();
+      if (data.predictions && data.predictions[0]) {
+        const base64 = data.predictions[0].bytesBase64Encoded;
+        return isUrl ? `data:image/png;base64,${base64}` : base64;
+      }
+      throw new Error('Imagen generation failed: ' + JSON.stringify(data));
+    }
     const generate = (
       await openai.images.generate({
         prompt,
         response_format: isUrl ? 'url' : 'b64_json',
-        model: 'dall-e-3',
+        model,
         ...(isVertical ? { size: '1024x1792' } : {}),
       })
     ).data[0];
@@ -35,11 +51,11 @@ export class OpenaiService {
     return (
       (
         await openai.chat.completions.parse({
-          model: 'gpt-4.1',
+          model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
           messages: [
             {
               role: 'system',
-              content: `You are an assistant that take a description and style and generate a prompt that will be used later to generate images, make it a very long and descriptive explanation, and write a lot of things for the renderer like, if it${"'"}s realistic describe the camera`,
+              content: `You are an assistant that take a description and style and generate a prompt that will be used later to generate images, make it a very long and descriptive explanation, and write a lot of things for the renderer like, if it's realistic describe the camera`,
             },
             {
               role: 'user',
@@ -56,11 +72,11 @@ export class OpenaiService {
     return (
       (
         await openai.chat.completions.parse({
-          model: 'gpt-4.1',
+          model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
           messages: [
             {
               role: 'system',
-              content: `You are an assistant that takes a social media post and convert it to a normal human voice, to be later added to a character, when a person talk they don\'t use "-", and sometimes they add pause with "..." to make it sounds more natural, make sure you use a lot of pauses and make it sound like a real person`,
+              content: `You are an assistant that takes a social media post and convert it to a normal human voice, to be later added to a character, when a person talk they don't use "-", and sometimes they add pause with "..." to make it sounds more natural, make sure you use a lot of pauses and make it sound like a real person`,
             },
             {
               role: 'user',
@@ -90,7 +106,7 @@ export class OpenaiService {
           ],
           n: 5,
           temperature: 1,
-          model: 'gpt-4.1',
+          model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
         }),
         openai.chat.completions.create({
           messages: [
@@ -106,7 +122,7 @@ export class OpenaiService {
           ],
           n: 5,
           temperature: 1,
-          model: 'gpt-4.1',
+          model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
         }),
       ])
     ).flatMap((p) => p.choices);
@@ -144,7 +160,7 @@ export class OpenaiService {
           content,
         },
       ],
-      model: 'gpt-4.1',
+      model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
     });
 
     const { content: articleContent } = websiteContent.choices[0].message;
@@ -164,7 +180,7 @@ export class OpenaiService {
     const posts =
       (
         await openai.chat.completions.parse({
-          model: 'gpt-4.1',
+          model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
           messages: [
             {
               role: 'system',
@@ -197,7 +213,7 @@ export class OpenaiService {
               return (
                 (
                   await openai.chat.completions.parse({
-                    model: 'gpt-4.1',
+                    model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
                     messages: [
                       {
                         role: 'system',
@@ -233,7 +249,7 @@ export class OpenaiService {
         const parse =
           (
             await openai.chat.completions.parse({
-              model: 'gpt-4.1',
+              model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
               messages: [
                 {
                   role: 'system',
