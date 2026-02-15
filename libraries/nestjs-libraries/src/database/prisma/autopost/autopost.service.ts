@@ -36,14 +36,16 @@ interface WorkflowChannelsState {
 }
 
 const model = new ChatOpenAI({
+  configuration: { baseURL: process.env.OPENAI_BASE_URL },
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'gpt-4.1',
+  model: process.env.OPENAI_MODEL_NAME || 'gpt-4o',
   temperature: 0.7,
 });
 
 const dalle = new DallEAPIWrapper({
+  configuration: { baseURL: process.env.OPENAI_BASE_URL },
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'gpt-image-1',
+  model: process.env.OPENAI_IMAGE_MODEL_NAME || 'dall-e-3',
 });
 
 const generateContent = z.object({
@@ -155,7 +157,8 @@ export class AutopostService {
             findLast?.description ||
             ''
         )
-          .replace(/\n/g, ' ')
+          .replace(/
+/g, ' ')
           .trim(),
       };
     } catch (err) {
@@ -222,7 +225,8 @@ export class AutopostService {
         Rules:
         - Maximum 100 chars
         - Try to make it a short as possible to fit any social media
-        - Add line breaks between sentences (\\n) 
+        - Add line breaks between sentences (\
+) 
         - Don't add hashtags
         - Add emojis when needed
         
@@ -287,8 +291,13 @@ export class AutopostService {
             id: makeId(10),
             delay: 0,
             content:
-              state.description.replace(/\n/g, '\n\n') +
-              '\n\n' +
+              state.description.replace(/
+/g, '
+
+') +
+              '
+
+' +
               state.load.url,
             image: !state.image
               ? []
