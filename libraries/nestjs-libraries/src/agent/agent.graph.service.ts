@@ -21,15 +21,22 @@ const tools = !process.env.TAVILY_API_KEY
   : [new TavilySearchResults({ maxResults: 3 })];
 const toolNode = new ToolNode(tools);
 
+const isGoogle = !!process.env.GOOGLE_AI_STUDIO_API_KEY;
 const model = new ChatOpenAI({
+  configuration: { baseURL: isGoogle ? (process.env.OPENAI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/') : process.env.OPENAI_BASE_URL },
+  apiKey: process.env.GOOGLE_AI_STUDIO_API_KEY || process.env.OPENAI_API_KEY || 'sk-proj-',
+  configuration: { baseURL: process.env.OPENAI_BASE_URL },
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'gpt-4.1',
+  model: process.env.OPENAI_MODEL_NAME || 'gpt-4o',
   temperature: 0.7,
 });
 
 const dalle = new DallEAPIWrapper({
+  configuration: { baseURL: isGoogle ? (process.env.OPENAI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/') : process.env.OPENAI_BASE_URL },
+  apiKey: process.env.GOOGLE_AI_STUDIO_API_KEY || process.env.OPENAI_API_KEY || 'sk-proj-',
+  configuration: { baseURL: process.env.OPENAI_BASE_URL },
   apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: 'dall-e-3',
+  model: process.env.OPENAI_IMAGE_MODEL_NAME || 'dall-e-3',
 });
 
 interface WorkflowChannelsState {
@@ -223,7 +230,8 @@ export class AgentGraphService {
         - Make sure it's engaging
         - Don't be cringy
         - Use simple english
-        - Make sure you add "\n" between the lines
+        - Make sure you add "
+" between the lines
         - Don't take the hook from "request of the user"
 
         <!-- BEGIN request of the user -->
@@ -243,7 +251,8 @@ export class AgentGraphService {
       .pipe(structuredOutput)
       .invoke({
         request: state.messages[0].content,
-        hooks: state.popularPosts!.map((p) => p.hook).join('\n'),
+        hooks: state.popularPosts!.map((p) => p.hook).join('
+'),
         text: state.fresearch,
       });
 
@@ -278,8 +287,10 @@ export class AgentGraphService {
         - Use simple english
         - The Content should not contain the hook
         - Try to put some call to action at the end of the post
-        - Make sure you add "\n" between the lines
-        - Add "\n" after every "."
+        - Make sure you add "
+" between the lines
+        - Add "
+" after every "."
         
         Hook:
         {hook}
