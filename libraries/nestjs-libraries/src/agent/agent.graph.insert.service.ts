@@ -8,10 +8,11 @@ import { z } from 'zod';
 import { agentTopics } from '@gitroom/nestjs-libraries/agent/agent.topics';
 import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.service';
 
+const isGoogle = !!process.env.GOOGLE_AI_STUDIO_API_KEY;
 const model = new ChatOpenAI({
-  configuration: { baseURL: process.env.OPENAI_BASE_URL },
-  apiKey: process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: process.env.OPENAI_MODEL_NAME || 'gpt-4o',
+  configuration: { baseURL: isGoogle ? (process.env.OPENAI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/') : process.env.OPENAI_BASE_URL },
+  apiKey: process.env.GOOGLE_AI_STUDIO_API_KEY || process.env.OPENAI_API_KEY || 'sk-proj-',
+  model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
   temperature: 0,
 });
 
