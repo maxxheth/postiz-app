@@ -15,24 +15,25 @@ import { z } from 'zod';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { UploadFactory } from '@gitroom/nestjs-libraries/upload/upload.factory';
 import { GeneratorDto } from '@gitroom/nestjs-libraries/dtos/generator/generator.dto';
+import { resolveOpenAiConfig } from '@gitroom/nestjs-libraries/openai/openai.config';
 
 const tools = !process.env.TAVILY_API_KEY
   ? []
   : [new TavilySearchResults({ maxResults: 3 })];
 const toolNode = new ToolNode(tools);
 
-const isGoogle = !!process.env.GOOGLE_AI_STUDIO_API_KEY;
+const openAiConfig = resolveOpenAiConfig();
 const model = new ChatOpenAI({
-  configuration: { baseURL: isGoogle ? (process.env.OPENAI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/') : process.env.OPENAI_BASE_URL },
-  apiKey: process.env.GOOGLE_AI_STUDIO_API_KEY || process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
+  configuration: { baseURL: openAiConfig.baseURL },
+  apiKey: openAiConfig.apiKey,
+  model: openAiConfig.model,
   temperature: 0.7,
 });
 
 const dalle = new DallEAPIWrapper({
-  configuration: { baseURL: isGoogle ? (process.env.OPENAI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/') : process.env.OPENAI_BASE_URL },
-  apiKey: process.env.GOOGLE_AI_STUDIO_API_KEY || process.env.OPENAI_API_KEY || 'sk-proj-',
-  model: process.env.OPENAI_IMAGE_MODEL_NAME || 'dall-e-3',
+  configuration: { baseURL: openAiConfig.baseURL },
+  apiKey: openAiConfig.apiKey,
+  model: openAiConfig.imageModel,
 });
 
 interface WorkflowChannelsState {

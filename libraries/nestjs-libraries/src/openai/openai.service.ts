@@ -3,11 +3,12 @@ import OpenAI from 'openai';
 import { shuffle } from 'lodash';
 import { zodResponseFormat } from 'openai/helpers/zod';
 import { z } from 'zod';
+import { resolveOpenAiConfig } from '@gitroom/nestjs-libraries/openai/openai.config';
 
-const isGoogle = !!process.env.GOOGLE_AI_STUDIO_API_KEY;
+const openAiConfig = resolveOpenAiConfig();
 const openai = new OpenAI({
-  apiKey: process.env.GOOGLE_AI_STUDIO_API_KEY || process.env.OPENAI_API_KEY || 'sk-proj-',
-  baseURL: isGoogle ? (process.env.OPENAI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/') : process.env.OPENAI_BASE_URL,
+  apiKey: openAiConfig.apiKey,
+  baseURL: openAiConfig.baseURL,
 });
 
 const PicturePrompt = z.object({
@@ -21,8 +22,8 @@ const VoicePrompt = z.object({
 @Injectable()
 export class OpenaiService {
   async generateImage(prompt: string, isUrl: boolean, isVertical = false) {
-    const model = process.env.OPENAI_IMAGE_MODEL_NAME || 'dall-e-3';
-    if (process.env.GOOGLE_AI_STUDIO_API_KEY && model.includes('imagen')) {
+    const model = openAiConfig.imageModel;
+    if (openAiConfig.isGoogle && model.includes('imagen')) {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${process.env.GOOGLE_AI_STUDIO_API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -51,7 +52,7 @@ export class OpenaiService {
     return (
       (
         await openai.chat.completions.parse({
-          model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
+          model: openAiConfig.model,
           messages: [
             {
               role: 'system',
@@ -72,7 +73,7 @@ export class OpenaiService {
     return (
       (
         await openai.chat.completions.parse({
-          model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
+          model: openAiConfig.model,
           messages: [
             {
               role: 'system',
@@ -106,7 +107,7 @@ export class OpenaiService {
           ],
           n: 5,
           temperature: 1,
-          model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
+          model: openAiConfig.model,
         }),
         openai.chat.completions.create({
           messages: [
@@ -122,7 +123,7 @@ export class OpenaiService {
           ],
           n: 5,
           temperature: 1,
-          model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
+          model: openAiConfig.model,
         }),
       ])
     ).flatMap((p) => p.choices);
@@ -160,7 +161,7 @@ export class OpenaiService {
           content,
         },
       ],
-      model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
+      model: openAiConfig.model,
     });
 
     const { content: articleContent } = websiteContent.choices[0].message;
@@ -180,7 +181,7 @@ export class OpenaiService {
     const posts =
       (
         await openai.chat.completions.parse({
-          model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
+          model: openAiConfig.model,
           messages: [
             {
               role: 'system',
@@ -213,7 +214,7 @@ export class OpenaiService {
               return (
                 (
                   await openai.chat.completions.parse({
-                    model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
+                    model: openAiConfig.model,
                     messages: [
                       {
                         role: 'system',
@@ -249,7 +250,7 @@ export class OpenaiService {
         const parse =
           (
             await openai.chat.completions.parse({
-              model: process.env.OPENAI_MODEL_NAME || (isGoogle ? 'gemini-1.5-flash' : 'gpt-4o'),
+              model: openAiConfig.model,
               messages: [
                 {
                   role: 'system',
