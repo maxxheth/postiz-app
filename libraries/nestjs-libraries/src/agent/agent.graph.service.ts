@@ -31,7 +31,7 @@ const model = new ChatOpenAI({
 });
 
 const dalle = new DallEAPIWrapper({
-  configuration: { baseURL: openAiConfig.baseURL },
+  baseUrl: openAiConfig.baseURL,
   apiKey: openAiConfig.apiKey,
   model: openAiConfig.imageModel,
 });
