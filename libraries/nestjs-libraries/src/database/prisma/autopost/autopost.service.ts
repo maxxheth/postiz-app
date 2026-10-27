@@ -24,12 +24,16 @@ const parser = new Parser();
 
 interface WorkflowChannelsState {
   messages: BaseMessage[];
-  orgId: string;
-  posts?: Array<{
+  integrations: Integration[];
+  body: AutoPost;
+  description: string;
+  image: string;
+  id: string;
+  load: {
+    date: string;
     url: string;
-    content: string;
     description: string;
-  }>;
+  };
 }
 
 const openAiConfig = resolveOpenAiConfig();
@@ -41,29 +45,129 @@ const model = new ChatOpenAI({
 });
 
 const dalle = new DallEAPIWrapper({
-  configuration: { baseURL: openAiConfig.baseURL },
+  baseUrl: openAiConfig.baseURL,
   apiKey: openAiConfig.apiKey,
   model: openAiConfig.imageModel,
 });
 
 const generateContent = z.object({
-  posts: z.array(
-    z.object({
-      url: z.string().describe('The URL of the post'),
-      content: z.string().describe('The content of the post'),
-      description: z.string().describe('A description of the post'),
-    })
-  ),
+  socialMediaPostContent: z
+    .string()
+    .describe('Content for social media posts max 120 chars'),
+});
+
+const dallePrompt = z.object({
+  generatedTextToBeSentToDallE: z
+    .string()
+    .describe('Generated prompt from description to be sent to DallE'),
 });
 
 @Injectable()
 export class AutopostService {
   constructor(
-    private _autopostRepository: AutopostRepository,
-    private _postsService: PostsService,
+    private _autopostsRepository: AutopostRepository,
+    private _temporalService: TemporalService,
     private _integrationService: IntegrationService,
-    private _temporalService: TemporalService
+    private _postsService: PostsService
   ) {}
+
+  async stopAll(org: string) {
+    const getAll = (await this.getAutoposts(org)).filter((f) => f.active);
+    for (const autopost of getAll) {
+      await this.changeActive(org, autopost.id, false);
+    }
+  }
+
+  getAutoposts(orgId: string) {
+    return this._autopostsRepository.getAutoposts(orgId);
+  }
+
+  async createAutopost(orgId: string, body: AutopostDto, id?: string) {
+    const data = await this._autopostsRepository.createAutopost(
+      orgId,
+      body,
+      id
+    );
+
+    await this.processCron(body.active, orgId, data.id);
+
+    return data;
+  }
+
+  async changeActive(orgId: string, id: string, active: boolean) {
+    const data = await this._autopostsRepository.changeActive(
+      orgId,
+      id,
+      active
+    );
+    await this.processCron(active, orgId, id);
+    return data;
+  }
+
+  async processCron(active: boolean, orgId: string, id: string) {
+    if (active) {
+      try {
+        return this._temporalService.client
+          .getRawClient()
+          ?.workflow.start('autoPostWorkflow', {
+            workflowId: `autopost-${id}`,
+            taskQueue: 'main',
+            args: [{ id, immediately: true }],
+            typedSearchAttributes: new TypedSearchAttributes([
+              {
+                key: organizationId,
+                value: orgId,
+              },
+            ]),
+          });
+      } catch (err) {}
+    }
+
+    try {
+      return await this._temporalService.terminateWorkflow(`autopost-${id}`);
+    } catch (err) {
+      return false;
+    }
+  }
+
+  async deleteAutopost(orgId: string, id: string) {
+    const data = await this._autopostsRepository.deleteAutopost(orgId, id);
+    await this.processCron(false, orgId, id);
+    return data;
+  }
+
+  async loadXML(url: string) {
+    try {
+      const { items } = await parser.parseURL(url);
+      const findLast = items.reduce(
+        (all: any, current: any) => {
+          if (dayjs(current.pubDate).isAfter(all.pubDate)) {
+            return current;
+          }
+          return all;
+        },
+        { pubDate: dayjs().subtract(100, 'years') }
+      );
+
+      return {
+        success: true,
+        date: findLast.pubDate,
+        url: findLast.link,
+        description: striptags(
+          findLast?.['content:encoded'] ||
+            findLast?.content ||
+            findLast?.description ||
+            ''
+        )
+          .replace(/\n/g, ' ')
+          .trim(),
+      };
+    } catch (err) {
+      /** sent **/
+    }
+
+    return { success: false };
+  }
 
   static state = () =>
     new StateGraph<WorkflowChannelsState>({
@@ -73,132 +177,199 @@ export class AutopostService {
             currentState.concat(updateValue),
           default: () => [],
         },
-        orgId: null,
-        posts: null,
+        body: null,
+        description: null,
+        load: null,
+        image: null,
+        integrations: null,
+        id: null,
       },
     });
 
-  async generatePosts(state: WorkflowChannelsState) {
+  async loadUrl(url: string) {
+    try {
+      const loadDom = new JSDOM(await (await fetch(url)).text());
+      loadDom.window.document
+        .querySelectorAll('script')
+        .forEach((s) => s.remove());
+      loadDom.window.document
+        .querySelectorAll('style')
+        .forEach((s) => s.remove());
+      // remove all html, script and styles
+      return striptags(loadDom.window.document.body.innerHTML);
+    } catch (err) {
+      return '';
+    }
+  }
+
+  async generateDescription(state: WorkflowChannelsState) {
+    if (!state.body.generateContent) {
+      return {
+        ...state,
+        description: state.body.content,
+      };
+    }
+
+    const description =
+      state.load.description || (await this.loadUrl(state.load.url));
+    if (!description) {
+      return {
+        ...state,
+        description: '',
+      };
+    }
+
     const structuredOutput = model.withStructuredOutput(generateContent);
-    const { posts } = await ChatPromptTemplate.fromTemplate(
+    const { socialMediaPostContent } = await ChatPromptTemplate.fromTemplate(
       `
-        You are an assistant that gets a list of RSS items and generate social media posts for them.
-        Extract the most relevant posts and generate a social media post for each one.
-        Make sure you don't generate more than 5 posts.
-        Make sure the content is engaging and use simple english.
-        Each post should have:
-        - The URL of the post
-        - The content of the post
-        - A description of the post
+        You are an assistant that gets raw 'description' of a content and generate a social media post content.
+        Rules:
+        - Maximum 100 chars
+        - Try to make it a short as possible to fit any social media
+        - Add line breaks between sentences (\\n) 
+        - Don't add hashtags
+        - Add emojis when needed
         
-        RSS items:
-        {messages}
+        'description':
+        {content}
       `
     )
       .pipe(structuredOutput)
       .invoke({
-        messages: state.messages.map((m) => m.content).join('\n'),
+        content: description,
       });
 
-    return { posts };
+    return {
+      ...state,
+      description: socialMediaPostContent,
+    };
   }
 
-  async createPosts(state: WorkflowChannelsState) {
-    const integrations = await this._integrationService.getIntegrations(
-      state.orgId
-    );
-    for (const post of state.posts || []) {
-      const date = await this._postsService.findFreeDateTime(state.orgId);
-      await this._postsService.createPost(state.orgId, {
-        date: date.toISOString(),
-        type: 'now',
-        posts: integrations.map((i) => ({
-          integrationId: i.id,
-          content: post.content,
-        })),
-      });
-    }
+  async generatePicture(state: WorkflowChannelsState) {
+    const structuredOutput = model.withStructuredOutput(dallePrompt);
+    const { generatedTextToBeSentToDallE } =
+      await ChatPromptTemplate.fromTemplate(
+        `
+        You are an assistant that gets description and generate a prompt that will be sent to DallE to generate pictures.
+        
+        content:
+        {content}
+      `
+      )
+        .pipe(structuredOutput)
+        .invoke({
+          content: state.load.description || state.description,
+        });
 
-    return {};
+    const image = await dalle.invoke(generatedTextToBeSentToDallE);
+
+    return { ...state, image };
   }
 
-  async getAutoposts() {
-    return this._autopostRepository.getAutoposts();
-  }
-
-  async createAutopost(orgId: string, autopostDto: AutopostDto) {
-    const id = makeId(10);
-    const create = await this._autopostRepository.createAutopost(
-      orgId,
-      autopostDto,
-      id
+  async schedulePost(state: WorkflowChannelsState) {
+    const nextTime = await this._postsService.findFreeDateTime(
+      state.integrations[0].organizationId
     );
 
-    await this._temporalService.createOrUpdateSchedule(
-      'autopost-' + create.id,
-      'autopost-workflow',
-      create.frequency,
-      {
-        args: [create.id],
-        searchAttributes: {
-          [organizationId.name]: orgId,
-        } as TypedSearchAttributes,
-      }
-    );
-
-    return create;
+    await this._postsService.createPost(state.integrations[0].organizationId, {
+      date: nextTime + 'Z',
+      order: makeId(10),
+      shortLink: false,
+      type: 'draft',
+      tags: [],
+      posts: state.integrations.map((i) => ({
+        settings: {
+          __type: i.providerIdentifier as any,
+          title: '',
+          tags: [],
+          subreddit: [],
+        },
+        group: makeId(10),
+        integration: { id: i.id },
+        value: [
+          {
+            id: makeId(10),
+            delay: 0,
+            content:
+              state.description.replace(/\n/g, '\n\n') +
+              '\n\n' +
+              state.load.url,
+            image: !state.image
+              ? []
+              : [
+                  {
+                    id: makeId(10),
+                    name: makeId(10),
+                    path: state.image,
+                    organizationId: state.integrations[0].organizationId,
+                  },
+                ],
+          },
+        ],
+      })),
+    });
   }
 
-  async deleteAutopost(orgId: string, id: string) {
-    await this._temporalService.deleteSchedule('autopost-' + id);
-    return this._autopostRepository.deleteAutopost(orgId, id);
+  async updateUrl(state: WorkflowChannelsState) {
+    await this._autopostsRepository.updateUrl(state.id, state.load.url);
   }
 
-  async updateAutopost(orgId: string, id: string, autopostDto: AutopostDto) {
-    const update = await this._autopostRepository.updateAutopost(
-      orgId,
-      id,
-      autopostDto
-    );
-
-    await this._temporalService.createOrUpdateSchedule(
-      'autopost-' + update.id,
-      'autopost-workflow',
-      update.frequency,
-      {
-        args: [update.id],
-        searchAttributes: {
-          [organizationId.name]: orgId,
-        } as TypedSearchAttributes,
-      }
-    );
-
-    return update;
-  }
-
-  async runAutopost(id: string) {
-    const autopost = await this._autopostRepository.getAutopostById(id);
-    if (!autopost) {
+  async startAutopost(id: string) {
+    const getPost = await this._autopostsRepository.getAutopost(id);
+    if (!getPost || !getPost.active) {
       return;
     }
 
-    const rss = await parser.parseURL(autopost.url);
+    const load = await this.loadXML(getPost.url);
+    if (!load.success || load.url === getPost.lastUrl) {
+      return;
+    }
+
+    const integrations = await this._integrationService.getIntegrationsList(
+      getPost.organizationId
+    );
+
+    const parseIntegrations = JSON.parse(getPost.integrations || '[]') || [];
+    const neededIntegrations = integrations.filter((i) =>
+      parseIntegrations.some((ii: any) => ii.id === i.id)
+    );
+
+    const integrationsToSend =
+      parseIntegrations.length === 0 ? integrations : neededIntegrations;
+    if (integrationsToSend.length === 0) {
+      return;
+    }
+
     const state = AutopostService.state();
     const workflow = state
-      .addNode('generate-posts', this.generatePosts.bind(this))
-      .addNode('create-posts', this.createPosts.bind(this))
-      .addEdge(START, 'generate-posts')
-      .addEdge('generate-posts', 'create-posts')
-      .addEdge('create-posts', END);
+      .addNode('generate-description', this.generateDescription.bind(this))
+      .addNode('generate-picture', this.generatePicture.bind(this))
+      .addNode('schedule-post', this.schedulePost.bind(this))
+      .addNode('update-url', this.updateUrl.bind(this))
+      .addEdge(START, 'generate-description')
+      .addConditionalEdges(
+        'generate-description',
+        (state: WorkflowChannelsState) => {
+          if (!state.description) {
+            return 'schedule-post';
+          }
+          if (state.body.addPicture) {
+            return 'generate-picture';
+          }
+          return 'schedule-post';
+        }
+      )
+      .addEdge('generate-picture', 'schedule-post')
+      .addEdge('schedule-post', 'update-url')
+      .addEdge('update-url', END);
 
     const app = workflow.compile();
-    return app.invoke({
-      messages: rss.items.map((i) => ({
-        content: `Title: ${i.title}\nDescription: ${striptags(
-          i.contentSnippet || i.content || ''
-        )}\nURL: ${i.link}`,
-      })) as any,
-      orgId: autopost.organizationId,
+    await app.invoke({
+      messages: [],
+      id,
+      body: getPost,
+      load,
+      integrations: integrationsToSend,
     });
   }
 }
