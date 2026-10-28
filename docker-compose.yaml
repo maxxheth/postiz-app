@@ -25,6 +25,7 @@ services:
       STORAGE_PROVIDER: '${STORAGE_PROVIDER:-local}'
       UPLOAD_DIRECTORY: '/uploads'
       NEXT_PUBLIC_UPLOAD_DIRECTORY: '/uploads'
+      NEXT_PUBLIC_UPLOAD_STATIC_DIRECTORY: '/uploads'
 
       # === AI Models
       OPENAI_API_KEY: '${OPENAI_API_KEY:-}'
@@ -37,6 +38,8 @@ services:
       # === Social Media API Settings
       FACEBOOK_APP_ID: '${FACEBOOK_APP_ID:-}'
       FACEBOOK_APP_SECRET: '${FACEBOOK_APP_SECRET:-}'
+      INSTAGRAM_APP_ID: '${INSTAGRAM_APP_ID:-}'
+      INSTAGRAM_APP_SECRET: '${INSTAGRAM_APP_SECRET:-}'
       X_API_KEY: '${X_API_KEY:-}'
       X_API_SECRET: '${X_API_SECRET:-}'
       LINKEDIN_CLIENT_ID: '${LINKEDIN_CLIENT_ID:-}'
